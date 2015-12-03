@@ -1,4 +1,9 @@
 .DS_Store
 
 # Folder
+dataset/
+dataset_clean/
+dataset_imported/
 
+# File
+*.pyc
