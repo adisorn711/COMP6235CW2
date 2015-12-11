@@ -33,6 +33,7 @@ def main():
     dataCleaner = AJDataCleaner('../dataset/', '../dataset_clean')
     dataCleaner.cleanData('microblogDataset_COMP6235_CW2.csv')
 
+
     client = AJDBClient()
     client.use(client.defaultDatabase)
     res = client.importFromFile('microblogDataset_COMP6235_CW2.csv')
@@ -46,14 +47,36 @@ def main():
 
         print('Your request is being processed. Please wait...')
         if choice == 2:
-            count = client.uniqueUsers()
+            count = client.getUniqueUsers()
             print('There are {} unique user(s).\n'.format(count))
         elif choice == 3:
-            count = client.top10Published()
+            count = client.getTop10Published()
             print('There are {:.2f} tweet(s)% published by top 10 users.\n'.format(count))
+        elif choice == 4:
+            minDate, maxDate = client.getMinAndMaxDate()
+            print('The earliest date was {}, and the latest date was {}.\n'.format(minDate, maxDate))
+        elif choice == 5:
+            delta = client.getMeanTimeDelta()
+            print('The mean delta time is {:.2f} second(s).\n'.format(delta))
         elif choice == 6:
-            meanLen = client.meanLengthOfMessages()
+            meanLen = client.getMeanLengthOfMessages()
             print('Mean length of all messages is {:.2f} character(s).\n'.format(meanLen))
+        elif choice == 7:
+            unigrams, bigrams = client.getUnigramAndBigram()
+
+            print('These are the 10 most common unigram strings:\n')
+            for i in range(len(unigrams)):
+                dct = unigrams[i]
+                print('{}. "{}" with {} count'.format(i+1, dct['word'], dct['count']))
+
+            print('\nThese are the 10 most common bigram strings:\n')
+            for i in range(len(bigrams)):
+                dct = bigrams[i]
+                print('{}. "{}" with {} count'.format(i+1, dct['word'], dct['count']))
+
+        elif choice == 8:
+            count = client.getNumberOfHashtags()
+            print('The average number of hashtag(#) is {:.2f} used within a message.\n'.format(count))
         elif choice == 9:
             res = client.getLocationOfLargestPublishedMessages()
             if res == None:

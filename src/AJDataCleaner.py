@@ -10,6 +10,7 @@ class AJDataCleaner:
         self.__fileHandler = AJFileHandler()
         self.cols = []
         self.__tempFile = None
+        self.__pendingData = []
 
     def cleanData(self, file_name, forced_update=False):
         file_path = self.__fileHandler.appendStringWithPath(self.readDir, file_name)
@@ -33,30 +34,48 @@ class AJDataCleaner:
             self.cols = headers
             self.writeToFile(','.join(headers) + '\n')
         elif len(self.cols) == len(obj):
-            values = obj
-            newVals = []
-            for i in range(0, len(values)):
-                key = self.cols[i]
-                value = values[i]
+            values = [obj]
 
-                if key == 'id':
-                    pass
-                elif key == 'id_member':
-                    v = abs(long(value))
-                    value = str(v)
-                elif key == 'timestamp':
-                    pass
-                elif key == 'text':
-                    pass
-                elif key == 'geo_lat':
-                    value = value.replace('\n', '')
-                elif key == 'geo_lng':
-                    value = value.replace('\n', '')
+            if len(self.__pendingData) > 0:
+                result = []
+                first3Data = self.__pendingData[:3]
+                text = self.__pendingData[3:-2]
+                locations = self.__pendingData[-2:]
 
-                newVals.append(value)
+                result.extend(first3Data)
+                result.extend(' '.join(text))
+                result.extend(locations)
+                values.append(result)
+
+            for k in range(0, len(values)):
+                doc = values[k]
+
+                newVals = []
+                for i in range(0, len(doc)):
+                    key = self.cols[i]
+                    value = doc[i]
+
+                    if key == 'id':
+                        pass
+                    elif key == 'id_member':
+                        v = abs(long(value))
+                        value = str(v)
+                    elif key == 'timestamp':
+                        pass
+                    elif key == 'text':
+                        pass
+                    elif key == 'geo_lat':
+                        value = value.replace('\n', '')
+                    elif key == 'geo_lng':
+                        value = value.replace('\n', '')
+
+                    newVals.append(value)
 
             self.writeToFile(','.join(newVals) + '\n')
-            #self.writeToFile(obj)
+            self.__pendingData = []
+
+        elif len(self.cols) == len(obj):
+            self.__pendingData.extend(obj)
 
     def completion(self):
         self.__tempFile.close()

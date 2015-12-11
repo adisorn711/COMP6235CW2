@@ -3,6 +3,8 @@ from pymongo import MongoClient
 from AJFileHandler import AJFileHandler
 import json
 from geopy.geocoders import Nominatim
+from datetime import datetime
+from bson.code import Code
 
 HOST = 'localhost'
 PORT = 27017
@@ -11,6 +13,68 @@ COLLECTION_NAME = 'blogstatus'
 TEMP_FILE_SUFFIX = '.flag'
 READ_DIR = '../dataset_clean'
 WRITE_DIR = '../dataset_imported'
+
+MAP_MEANLENGTH_STR = """
+function(){
+    emit(this.id, this.text.length)
+}
+"""
+
+RED_MEANLENGTH_STR = """
+function(key, values){
+    return Array.sum(values)
+}
+"""
+
+MAP_HASHTAG_STR = """
+function(){
+    var numTags = (this.text.match(/#/g) || []).length;
+    emit(this.id, numTags)
+}
+"""
+
+RED_HASHTAG_STR = """
+function(key, values){
+    return Array.sum(values)
+}
+"""
+
+MAP_NGRAM_STR = """
+function(){
+    var punctuationless = this.text.replace(/[.,-\/#!$%\^&\*;:{}=\-_`~()]/g,"");
+    var finalString = punctuationless.replace(/\s{2,}/g," ");
+
+    var words = finalString.split(' ');
+    var i;
+    for (var i=0; i < words.length; i++) {
+        var word = words[i].trim();
+        if (word.length > 0) {
+            emit(word, 1);
+        }
+    }
+}
+"""
+
+MAP_BIGRAM_STR = """
+function(){
+    var punctuationless = this.text.replace(/[.,-\/#!$%\^&\*;:{}=\-_`~()]/g,"");
+    var finalString = punctuationless.replace(/\s{2,}/g," ");
+
+    var words = finalString.split(' ');
+    var i;
+    for (var i=0; i < words.length-1; i++) {
+        var twoWords = words[i] + " " + words[i+1];
+        emit(twoWords, 1);
+    }
+}
+"""
+
+RED_NGRAM_STR = """
+function(key, values){
+    return Array.sum(values)
+}
+"""
+
 
 class AJDBClient(object):
 
@@ -21,6 +85,11 @@ class AJDBClient(object):
         self.__fileHandler = AJFileHandler()
         self.__bulk = None
         self.__cols = []
+
+        self.__meanLenResult = None
+        self.__hashtagResult = None
+        self.__unigramResult = None
+        self.__bigramResult = None
 
     def find(self, predicate={}):
         res = []
@@ -34,12 +103,12 @@ class AJDBClient(object):
         res = self.collection.count()
         return res
 
-    def uniqueUsers(self):
+    def getUniqueUsers(self):
         res = self.collection.distinct('id_member')
         #print('type of res: {}'.format(type(res)))
         return len(res)
 
-    def top10Published(self):
+    def getTop10Published(self):
         msgCount = float(self.count())
         res = self.collection.aggregate([{'$group': {'_id': "$id_member", 'count': {'$sum': 1}}},
                                         {'$sort': {'count': -1}},
@@ -51,17 +120,91 @@ class AJDBClient(object):
 
         return (float(count)/msgCount)*100.0
 
-    def meanLengthOfMessages(self):
-        msgCount = float(self.count())
-        res = self.collection.map_reduce('function(){emit("textLength",this.text.length)}'
-                                        , 'function(key, values){ return Array.sum(values)}'
-                                        , "results", query={})
-        totalLength = 0.0
-        for doc in res.find():
-            totalLength = float(doc['value'])
-            break
+    def getMinAndMaxDate(self):
+        minDateRes = self.collection.find().sort('timestamp', 1).limit(1)
+        maxDateRes = self.collection.find().sort('timestamp', -1).limit(1)
 
-        return totalLength/msgCount
+        minDate = None
+        maxDate = None
+        for doc in minDateRes:
+            minDate = doc['timestamp']
+
+        for doc in maxDateRes:
+            maxDate = doc['timestamp']
+
+        return minDate, maxDate
+
+    def getMeanTimeDelta(self):
+        minDate , maxDate = self.getMinAndMaxDate()
+        print(minDate)
+
+        date1 = datetime.strptime(minDate, "%Y-%m-%d %H:%M:%S")
+        date2 = datetime.strptime(maxDate, "%Y-%m-%d %H:%M:%S")
+        delta = date2 - date1
+
+        deltaTime = delta.total_seconds()/self.count()
+        return deltaTime
+
+    def getMeanLengthOfMessages(self):
+        if self.__meanLenResult is None:
+            mapFunc = Code(MAP_MEANLENGTH_STR)
+            redFunc = Code(RED_MEANLENGTH_STR)
+            self.__meanLenResult = self.collection.map_reduce(mapFunc, redFunc, "meanTimeResults", query={})
+
+        meanRes = self.__meanLenResult.aggregate([{'$group': {'_id': "null", 'average': {'$avg': "$value"}}}], allowDiskUse=True)
+
+        meanLength = 0.0
+        for doc in meanRes:
+            meanLength = float(doc['average'])
+
+        return meanLength
+
+    def getUnigramAndBigram(self):
+        if self.__unigramResult is None:
+            mapFunc = Code(MAP_NGRAM_STR)
+            redFunc = Code(RED_NGRAM_STR)
+            self.__unigramResult = self.collection.map_reduce(mapFunc, redFunc, "unigramResults", query={})
+
+        if self.__bigramResult is None:
+            mapFunc = Code(MAP_BIGRAM_STR)
+            redFunc = Code(RED_NGRAM_STR)
+            self.__bigramResult = self.collection.map_reduce(mapFunc, redFunc, "bigramResults", query={})
+
+
+        unigRes = self.__unigramResult.find().sort('value', -1).limit(10)
+        bigramRes = self.__bigramResult.find().sort('value', -1).limit(10)
+
+        unigramRecords = []
+        for doc in unigRes:
+            dct = {}
+            dct['word'] = doc['_id']
+            dct['count'] = int(doc['value'])
+            unigramRecords.append(dct)
+
+        bigramRecords = []
+        for doc in bigramRes:
+            dct = {}
+            dct['word'] = doc['_id']
+            dct['count'] = int(doc['value'])
+            bigramRecords.append(dct)
+
+        return unigramRecords, bigramRecords
+
+
+    def getNumberOfHashtags(self):
+        if self.__hashtagResult is None:
+            mapFunc = Code(MAP_HASHTAG_STR)
+            redFunc = Code(RED_HASHTAG_STR)
+            self.__hashtagResult = self.collection.map_reduce(mapFunc, redFunc, "hashtagResults", query={})
+
+        hashtagRes = self.__hashtagResult.aggregate([{'$group': {'_id': "null", 'total': {'$sum': "$value"}}}], allowDiskUse=True)
+
+        nHashtags = 0.0
+        for doc in hashtagRes:
+            nHashtags = float(doc['total'])
+
+        return nHashtags/self.count()
+
 
     def getLocationOfLargestPublishedMessages(self):
         res = self.collection.aggregate([{'$group': {'_id': {'lat': "$geo_lat", 'long': "$geo_lng"},
@@ -155,7 +298,7 @@ class AJDBClient(object):
 
     @property
     def collection(self):
-        if (self.db == None):
+        if self.db is None:
             print('Please call "use(db_name)" before using client')
             return None
         return self.db[COLLECTION_NAME]
@@ -170,7 +313,7 @@ class AJDBClient(object):
 
     @property
     def bulk(self):
-        if self.__bulk == None:
+        if self.__bulk is None:
             self.__bulk = self.collection.initialize_unordered_bulk_op()
 
         return self.__bulk
