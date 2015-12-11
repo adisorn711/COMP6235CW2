@@ -1,7 +1,6 @@
 __author__ = 'Adisorn'
 from pymongo import MongoClient
 from AJFileHandler import AJFileHandler
-import json
 from geopy.geocoders import Nominatim
 from datetime import datetime
 from bson.code import Code
